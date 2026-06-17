@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "203108233475",
+    "project_id": "webtoon-flutter-pab2",
+    "storage_bucket": "webtoon-flutter-pab2.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:203108233475:android:39baaf3fd6cb11d16df936",
+        "android_client_info": {
+          "package_name": "com.example.webtoon_flutter_pab2"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCsi38bXZZQnmONnhwInamppkxjWWNvt3k"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
