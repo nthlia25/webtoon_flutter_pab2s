@@ -393,11 +393,35 @@ class _HistoryScreenState extends State<HistoryScreen>
                     onTap: () async {
                       // Mencari objek Webtoon asli berdasarkan judul agar bisa diarahkan ke DetailScreen
                       try {
-                        final Webtoon targetWebtoon = dummyWebtoons.firstWhere(
-                          (w) =>
-                              w.title.toLowerCase() ==
-                              item['title']?.toLowerCase(),
-                        );
+                        final prefs = await SharedPreferences.getInstance();
+                        final uid = FirebaseAuth.instance.currentUser?.uid ?? 'guest';
+                        final List<String> uploaded =
+                            prefs.getStringList('${uid}_uploaded_webtoons') ??
+                            prefs.getStringList('uploaded_webtoons') ??
+                            [];
+
+                        final targetWebtoon = uploaded
+                            .map((raw) => jsonDecode(raw))
+                            .whereType<Map<String, dynamic>>()
+                            .map((decoded) => Webtoon.fromJson(decoded))
+                            .firstWhere(
+                              (webtoon) =>
+                                  webtoon.title.toLowerCase() ==
+                                  (item['title'] ?? '').toLowerCase(),
+                              orElse: () => Webtoon(
+                                id: '',
+                                title: '',
+                                genre: '',
+                                rating: '0.0',
+                                image: '',
+                                synopsis: '',
+                                episodes: const [],
+                              ),
+                            );
+
+                        if (targetWebtoon.id.isEmpty) {
+                          throw Exception('Webtoon not found');
+                        }
 
                         await Navigator.push(
                           context,
@@ -406,10 +430,8 @@ class _HistoryScreenState extends State<HistoryScreen>
                                 DetailScreen(webtoon: targetWebtoon),
                           ),
                         );
-                        // Refresh data saat kembali (siapa tahu urutan riwayat berubah)
                         _loadHistory();
                       } catch (e) {
-                        // Jika data dummy tidak ditemukan
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
                             content: Text('Detail komik tidak ditemukan.'),

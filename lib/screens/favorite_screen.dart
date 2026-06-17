@@ -79,7 +79,7 @@ class _FavoriteScreenState extends State<FavoriteScreen>
     }
   }
 
-  // Mengambil daftar ID favorit dari SharedPreferences lalu mencocokkannya dengan Dummy Data
+  // Mengambil daftar ID favorit dari SharedPreferences lalu mencocokkannya dengan webtoon yang sudah diupload
   Future<void> _loadFavoriteWebtoons() async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     final uid = FirebaseAuth.instance.currentUser?.uid ?? 'guest';
@@ -90,8 +90,7 @@ class _FavoriteScreenState extends State<FavoriteScreen>
         prefs.getStringList('favoriteWebtoons') ??
         [];
 
-    // Build a map of available webtoons: dummy + uploaded
-    final Map<String, Webtoon> pool = {for (var w in dummyWebtoons) w.id: w};
+    final Map<String, Webtoon> pool = {};
 
     final List<String> uploaded =
         prefs.getStringList('${uid}_uploaded_webtoons') ??

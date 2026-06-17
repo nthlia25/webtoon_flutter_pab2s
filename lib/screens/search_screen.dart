@@ -25,14 +25,12 @@ class _SearchScreenState extends State<SearchScreen> {
     _searchController.addListener(_searchWebtoons);
   }
 
-  // Fungsi pencarian data lokal secara real-time (dummy + uploaded webtoons)
+  // Fungsi pencarian data lokal secara real-time dari webtoon yang sudah diupload
   void _searchWebtoons() async {
     final query = _searchController.text.toLowerCase();
 
-    // Start with dummy webtoons
-    List<Webtoon> all = List<Webtoon>.from(dummyWebtoons);
+    List<Webtoon> all = [];
 
-    // Add uploaded webtoons
     try {
       final prefs = await SharedPreferences.getInstance();
       final uid = FirebaseAuth.instance.currentUser?.uid ?? 'guest';

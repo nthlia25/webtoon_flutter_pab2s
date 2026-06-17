@@ -1,13 +1,16 @@
 import 'dart:convert';
-
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webtoon_flutter_pab2/model/webtoon.dart';
 import 'package:webtoon_flutter_pab2/theme.dart';
 import 'package:webtoon_flutter_pab2/screens/detail_screen.dart';
 import 'package:webtoon_flutter_pab2/screens/search_screen.dart';
 import 'package:webtoon_flutter_pab2/screens/upload_screen.dart';
+
+// Fungsi helper untuk menyamakan format teks genre saat pencocokan/filter
+String normalizeGenre(String value) {
+  return value.trim().toLowerCase();
+}
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -39,6 +42,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _loadWebtoons();
   }
 
+  // Fungsi pembantu untuk memuat gambar, baik dari asset local maupun Base64 dari Firestore
   Widget _buildCoverImage(
     String image, {
     double width = 150,
@@ -65,6 +69,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     try {
+      // Decode Base64 string yang diambil dari Firestore field 'image'
       final bytes = base64Decode(image);
       return Image.memory(
         bytes,
@@ -73,31 +78,60 @@ class _HomeScreenState extends State<HomeScreen> {
         fit: BoxFit.cover,
       );
     } catch (e) {
-      return Container(width: width, height: height, color: Colors.grey[200]);
+      return Container(
+        width: width,
+        height: height,
+        color: Colors.grey[200],
+        child: const Icon(Icons.broken_image, color: Colors.grey),
+      );
     }
   }
 
+  // Mengambil data real-time / langsung dari Cloud Firestore collection 'webtoons'
   Future<void> _loadWebtoons() async {
-    await Future.delayed(const Duration(milliseconds: 300));
+    setState(() {
+      _isLoading = true;
+    });
 
-    List<Webtoon> all = List<Webtoon>.from(dummyWebtoons);
+    List<Webtoon> all = [];
 
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final uid = FirebaseAuth.instance.currentUser?.uid ?? 'guest';
-      final List<String> uploaded =
-          prefs.getStringList('${uid}_uploaded_webtoons') ??
-          prefs.getStringList('uploaded_webtoons') ??
-          [];
-      for (final raw in uploaded) {
-        try {
-          final Map<String, dynamic> decoded = jsonDecode(raw);
-          final Webtoon w = Webtoon.fromJson(decoded);
-          all.add(w);
-        } catch (_) {}
-      }
-    } catch (_) {}
+      // Fetch dokumen dari collection 'webtoons'
+      QuerySnapshot querySnapshot = await FirebaseFirestore.instance
+          .collection('webtoons')
+          .get();
 
+      for (final doc in querySnapshot.docs) {
+        try {
+          final Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+          
+          // Mapping data dokumen Firestore ke Model Webtoon secara aman
+          final Webtoon w = Webtoon.fromJson({
+            'id': data['id'] ?? doc.id,
+            'title': data['title'] ?? '',
+            'genre': data['genre'] ?? '',
+            'rating': data['rating']?.toString() ?? '0.0', // Antisipasi jika rating bertipe num/double di Firestore
+            'image': data['image'] ?? '',
+            'synopsis': data['synopsis'] ?? '',
+            'episodes': data['episodes'] != null 
+                ? List<String>.from(data['episodes']) 
+                : <String>[],
+          });
+          all.add(w);
+        } catch (e) {
+          debugPrint('Gagal parse dokumen ${doc.id}: $e');
+        }
+      }
+    } catch (e) {
+      debugPrint('Error mengambil data dari Firestore: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Gagal mengambil data dari cloud: $e')),
+        );
+      }
+    }
+
+    // Filter webtoon berdasarkan masing-masing genre secara otomatis
     final genreWebtoons = {
       for (final genre in _genreLabels)
         genre: all
@@ -108,11 +142,13 @@ class _HomeScreenState extends State<HomeScreen> {
             .toList(),
     };
 
-    setState(() {
-      _trendingWebtoons = all;
-      _genreWebtoons = genreWebtoons;
-      _isLoading = false;
-    });
+    if (mounted) {
+      setState(() {
+        _trendingWebtoons = all; // Menjadikan semua item terunggah sebagai trending list sementara
+        _genreWebtoons = genreWebtoons;
+        _isLoading = false;
+      });
+    }
   }
 
   @override
@@ -147,7 +183,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 MaterialPageRoute(
                   builder: (context) => UploadScreen(
                     onWebtoonAdded: (map) {
-                      _loadWebtoons();
+                      _loadWebtoons(); // Refresh otomatis setelah upload berhasil
                     },
                   ),
                 ),
@@ -158,14 +194,14 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       floatingActionButton: FloatingActionButton(
         backgroundColor: kSoftPink,
-        child: const Icon(Icons.add),
+        child: const Icon(Icons.add, color: Colors.white),
         onPressed: () async {
           await Navigator.push(
             context,
             MaterialPageRoute(
               builder: (context) => UploadScreen(
                 onWebtoonAdded: (map) {
-                  _loadWebtoons();
+                  _loadWebtoons(); // Refresh otomatis setelah upload berhasil
                 },
               ),
             ),
@@ -174,19 +210,24 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator(color: kSoftPink))
-          : SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const SizedBox(height: 10),
-                  _buildWebtoonList('Trending Hari Ini', _trendingWebtoons),
-                  for (final genre in _genreLabels)
-                    if ((_genreWebtoons[genre] ?? []).isNotEmpty)
-                      _buildWebtoonList(
-                        'Genre $genre',
-                        _genreWebtoons[genre] ?? [],
-                      ),
-                ],
+          : RefreshIndicator(
+              color: kSoftPink,
+              onRefresh: _loadWebtoons, // Memungkinkan user menarik layar ke bawah untuk refresh manual
+              child: SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const SizedBox(height: 10),
+                    _buildWebtoonList('Trending Hari Ini', _trendingWebtoons),
+                    for (final genre in _genreLabels)
+                      if ((_genreWebtoons[genre] ?? []).isNotEmpty)
+                        _buildWebtoonList(
+                          'Genre $genre',
+                          _genreWebtoons[genre] ?? [],
+                        ),
+                  ],
+                ),
               ),
             ),
     );
@@ -243,7 +284,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           borderRadius: BorderRadius.circular(8.0),
                           child: _buildCoverImage(
                             webtoon.image,
-                            width: 150,
+                            width: 120,
                             height: 150,
                           ),
                         ),
