@@ -1,3 +1,7 @@
+String normalizeGenre(String value) {
+  return value.trim().toLowerCase();
+}
+
 class Webtoon {
   final String id;
   final String title;

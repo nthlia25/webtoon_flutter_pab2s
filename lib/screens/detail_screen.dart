@@ -297,6 +297,7 @@ class _DetailScreenState extends State<DetailScreen> {
                             episodeTitle: episodeName,
                             episodes: widget.webtoon.episodes,
                             initialEpisodeIndex: index,
+                            coverImage: widget.webtoon.image,
                           ),
                         ),
                       );

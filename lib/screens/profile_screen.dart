@@ -5,6 +5,7 @@ import 'package:webtoon_flutter_pab2/screens/favorite_screen.dart';
 import 'package:webtoon_flutter_pab2/screens/history_screen.dart';
 import 'package:webtoon_flutter_pab2/screens/signin_screen.dart';
 import 'package:webtoon_flutter_pab2/theme.dart';
+import 'package:webtoon_flutter_pab2/theme_manager.dart';
 import 'package:webtoon_flutter_pab2/service/auth_service.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -21,6 +22,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String _email = '';
   bool _isLoading = true;
   bool _isSaving = false;
+  bool _isDarkMode = false;
 
   @override
   void initState() {
@@ -30,10 +32,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   void _loadUser() {
     final User? user = _authService.currentUser;
+    final isDark = themeNotifier.value == ThemeMode.dark;
 
     setState(() {
       _displayName = user?.displayName ?? _fallbackName(user?.email);
       _email = user?.email ?? '';
+      _isDarkMode = isDark;
       _isLoading = false;
     });
   }
@@ -168,14 +172,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: const Text(
           'Profil Saya',
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black,
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+        foregroundColor: Theme.of(context).colorScheme.onBackground,
         elevation: 0.5,
       ),
       body: _isLoading
@@ -221,6 +225,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       title: const Text('Edit Profil'),
                       trailing: const Icon(Icons.chevron_right),
                       onTap: _showEditProfileDialog,
+                    ),
+                  ),
+
+                  Card(
+                    margin: const EdgeInsets.symmetric(vertical: 6),
+                    child: SwitchListTile(
+                      secondary: const Icon(
+                        Icons.dark_mode_outlined,
+                        color: kSoftPink,
+                      ),
+                      title: const Text('Dark Mode'),
+                      value: _isDarkMode,
+                      onChanged: (value) async {
+                        await saveThemeMode(value);
+                        if (mounted) {
+                          setState(() {
+                            _isDarkMode = value;
+                          });
+                        }
+                      },
                     ),
                   ),
 

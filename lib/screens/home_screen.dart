@@ -18,8 +18,19 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   List<Webtoon> _trendingWebtoons = [];
-  List<Webtoon> _romanceWebtoons = [];
-  List<Webtoon> _fantasyWebtoons = [];
+  final List<String> _genreLabels = const [
+    'Romance',
+    'Fantasy',
+    'Action',
+    'Comedy',
+    'Drama',
+    'Horror',
+    'Sci-Fi',
+    'Thriller',
+    'Slice of Life',
+    'Mystery',
+  ];
+  Map<String, List<Webtoon>> _genreWebtoons = {};
   bool _isLoading = true;
 
   @override
@@ -87,17 +98,19 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     } catch (_) {}
 
+    final genreWebtoons = {
+      for (final genre in _genreLabels)
+        genre: all
+            .where(
+              (webtoon) =>
+                  normalizeGenre(webtoon.genre) == normalizeGenre(genre),
+            )
+            .toList(),
+    };
+
     setState(() {
       _trendingWebtoons = all;
-
-      _romanceWebtoons = all
-          .where((w) => w.genre.toLowerCase() == 'romance')
-          .toList();
-
-      _fantasyWebtoons = all
-          .where((w) => w.genre.toLowerCase() == 'fantasy')
-          .toList();
-
+      _genreWebtoons = genreWebtoons;
       _isLoading = false;
     });
   }
@@ -167,8 +180,12 @@ class _HomeScreenState extends State<HomeScreen> {
                 children: [
                   const SizedBox(height: 10),
                   _buildWebtoonList('Trending Hari Ini', _trendingWebtoons),
-                  _buildWebtoonList('Genre Romance', _romanceWebtoons),
-                  _buildWebtoonList('Genre Fantasy', _fantasyWebtoons),
+                  for (final genre in _genreLabels)
+                    if ((_genreWebtoons[genre] ?? []).isNotEmpty)
+                      _buildWebtoonList(
+                        'Genre $genre',
+                        _genreWebtoons[genre] ?? [],
+                      ),
                 ],
               ),
             ),

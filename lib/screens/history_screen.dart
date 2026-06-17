@@ -3,9 +3,74 @@ import 'dart:convert';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:webtoon_flutter_pab2/model/webtoon.dart';
 import 'package:webtoon_flutter_pab2/screens/detail_screen.dart';
 import 'package:webtoon_flutter_pab2/theme.dart';
+
+List<Map<String, dynamic>> groupHistoryEntries(
+  List<Map<String, String>> entries,
+) {
+  final grouped = <String, List<Map<String, String>>>{};
+
+  for (final entry in entries) {
+    final title = (entry['title'] ?? '').trim();
+    final episode = (entry['episode'] ?? '').trim();
+    final timestamp = (entry['timestamp'] ?? '').trim();
+    final latitude = (entry['latitude'] ?? '').trim();
+    final longitude = (entry['longitude'] ?? '').trim();
+
+    if (title.isEmpty || episode.isEmpty) {
+      continue;
+    }
+
+    final key = title.toLowerCase();
+    grouped.putIfAbsent(key, () => []);
+
+    final existingIndex = grouped[key]!.indexWhere(
+      (item) => item['episode'] == episode && item['title'] == title,
+    );
+
+    final normalizedEntry = {
+      'title': title,
+      'episode': episode,
+      'timestamp': timestamp,
+      'latitude': latitude,
+      'longitude': longitude,
+    };
+
+    if (existingIndex == -1) {
+      grouped[key]!.add(normalizedEntry);
+    } else if (timestamp.compareTo(
+          grouped[key]![existingIndex]['timestamp'] ?? '',
+        ) >
+        0) {
+      grouped[key]![existingIndex] = normalizedEntry;
+    }
+  }
+
+  final groupedList = grouped.entries.map((entry) {
+    final title = entry.value.first['title'] ?? '';
+    final episodes = entry.value
+      ..sort((a, b) {
+        return (b['timestamp'] ?? '').compareTo(a['timestamp'] ?? '');
+      });
+
+    return {
+      'title': title,
+      'lastTimestamp': episodes.first['timestamp'] ?? '',
+      'episodes': episodes,
+    };
+  }).toList();
+
+  groupedList.sort((a, b) {
+    return (b['lastTimestamp'] as String).compareTo(
+      a['lastTimestamp'] as String,
+    );
+  });
+
+  return groupedList;
+}
 
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
@@ -16,7 +81,7 @@ class HistoryScreen extends StatefulWidget {
 
 class _HistoryScreenState extends State<HistoryScreen>
     with WidgetsBindingObserver {
-  List<Map<String, String>> _historyData = [];
+  List<Map<String, dynamic>> _historyData = [];
   bool _isLoading = true;
 
   void reloadHistory() {
@@ -68,7 +133,7 @@ class _HistoryScreenState extends State<HistoryScreen>
       rawHistory = prefs.getStringList('readHistory') ?? [];
     }
 
-    List<Map<String, String>> parsedHistory = [];
+    final List<Map<String, String>> parsedHistory = [];
 
     for (String entry in rawHistory) {
       try {
@@ -77,12 +142,16 @@ class _HistoryScreenState extends State<HistoryScreen>
           final title = decoded['title']?.toString() ?? '';
           final episode = decoded['episode']?.toString() ?? '';
           final timestamp = decoded['timestamp']?.toString() ?? '';
+          final latitude = decoded['latitude']?.toString() ?? '';
+          final longitude = decoded['longitude']?.toString() ?? '';
 
           if (title.isNotEmpty && episode.isNotEmpty) {
             parsedHistory.add({
               'title': title,
               'episode': episode,
               'timestamp': timestamp,
+              'latitude': latitude,
+              'longitude': longitude,
             });
           }
           continue;
@@ -101,7 +170,7 @@ class _HistoryScreenState extends State<HistoryScreen>
     }
 
     setState(() {
-      _historyData = parsedHistory;
+      _historyData = groupHistoryEntries(parsedHistory);
       _isLoading = false;
     });
   }
@@ -120,6 +189,18 @@ class _HistoryScreenState extends State<HistoryScreen>
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Semua riwayat berhasil dihapus')),
       );
+    }
+  }
+
+  Future<void> _openEpisodeLocation(
+    String latitude,
+    String longitude,
+  ) async {
+    final url = Uri.parse(
+      'https://www.google.com/maps/search/?api=1&query=$latitude,$longitude',
+    );
+    if (await canLaunchUrl(url)) {
+      await launchUrl(url, mode: LaunchMode.externalApplication);
     }
   }
 
@@ -202,6 +283,8 @@ class _HistoryScreenState extends State<HistoryScreen>
               itemCount: _historyData.length,
               itemBuilder: (context, index) {
                 final item = _historyData[index];
+                final episodes =
+                    (item['episodes'] as List<Map<String, String>>?) ?? [];
 
                 return Card(
                   margin: const EdgeInsets.symmetric(
@@ -236,21 +319,71 @@ class _HistoryScreenState extends State<HistoryScreen>
                     subtitle: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          'Terakhir dibaca: ${item['episode']}',
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: Colors.black54,
+                        const SizedBox(height: 4),
+                        for (final episode in episodes)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  '${episode['episode']}: ${_formatTimestamp(episode['timestamp'])}',
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.black54,
+                                  ),
+                                ),
+                                if ((episode['latitude'] ?? '').isNotEmpty &&
+                                    (episode['longitude'] ?? '').isNotEmpty)
+                                  Row(
+                                    children: [
+                                      const Icon(
+                                        Icons.location_on,
+                                        size: 14,
+                                        color: kSoftPink,
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Expanded(
+                                        child: Text(
+                                          '${episode['latitude']?.substring(0, 8)}, ${episode['longitude']?.substring(0, 8)}',
+                                          style: const TextStyle(
+                                            fontSize: 11,
+                                            color: Colors.black45,
+                                          ),
+                                        ),
+                                      ),
+                                      TextButton(
+                                        onPressed: () async {
+                                          await _openEpisodeLocation(
+                                            episode['latitude'] ?? '',
+                                            episode['longitude'] ?? '',
+                                          );
+                                        },
+                                        style: TextButton.styleFrom(
+                                          padding: EdgeInsets.zero,
+                                          minimumSize: const Size(0, 0),
+                                        ),
+                                        child: const Text(
+                                          'Maps',
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            color: kSoftPink,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  )
+                                else
+                                  const Text(
+                                    'Belum ada GPS',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.black45,
+                                    ),
+                                  ),
+                              ],
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          'Waktu: ${_formatTimestamp(item['timestamp'])}',
-                          style: const TextStyle(
-                            fontSize: 11,
-                            color: Colors.black45,
-                          ),
-                        ),
                       ],
                     ),
                     trailing: const Icon(

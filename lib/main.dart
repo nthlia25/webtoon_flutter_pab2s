@@ -3,6 +3,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:webtoon_flutter_pab2/screens/profile_screen.dart';
 import 'package:webtoon_flutter_pab2/theme.dart';
+import 'package:webtoon_flutter_pab2/theme_manager.dart';
 
 import 'firebase_options.dart';
 
@@ -16,6 +17,7 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  await loadSavedThemeMode();
 
   runApp(const MyApp());
 }
@@ -25,14 +27,28 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'PINK TOON',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: kSoftPink),
-        useMaterial3: true,
-      ),
-      home: const AuthChecker(),
+    return ValueListenableBuilder<ThemeMode>(
+      valueListenable: themeNotifier,
+      builder: (context, themeMode, child) {
+        return MaterialApp(
+          title: 'PINK TOON',
+          debugShowCheckedModeBanner: false,
+          themeMode: themeMode,
+          theme: ThemeData(
+            colorScheme: ColorScheme.fromSeed(seedColor: kSoftPink),
+            useMaterial3: true,
+          ),
+          darkTheme: ThemeData(
+            brightness: Brightness.dark,
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: kSoftPink,
+              brightness: Brightness.dark,
+            ),
+            useMaterial3: true,
+          ),
+          home: const AuthChecker(),
+        );
+      },
     );
   }
 }
