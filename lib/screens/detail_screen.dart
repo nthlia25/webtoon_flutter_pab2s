@@ -1,11 +1,15 @@
 import 'dart:convert';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webtoon_flutter_pab2/model/webtoon.dart';
 import 'package:webtoon_flutter_pab2/theme.dart';
 import 'viewer_screen.dart';
+
+// PASTIKAN IMPORT FILE INI SESUAI DENGAN LOKASI FILE ANDA:
+import 'upload_episode_screen.dart'; 
 
 class DetailScreen extends StatefulWidget {
   final Webtoon webtoon;
@@ -25,18 +29,58 @@ class _DetailScreenState extends State<DetailScreen> {
     _checkIsFavorite();
   }
 
-  String _userStorageKey(String key) {
-    final uid = FirebaseAuth.instance.currentUser?.uid ?? 'guest';
-    return '${uid}_$key';
+  Future<void> _checkIsFavorite() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    try {
+      final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+      if (doc.exists) {
+        List<dynamic> favorites = doc.data()?['favorites'] ?? [];
+        if (mounted) {
+          setState(() {
+            _isFavorite = favorites.contains(widget.webtoon.id.toString());
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint("Error checking favorite: $e");
+    }
   }
 
-  // Memeriksa apakah webtoon ini sudah ditandai favorit di memori lokal
-  Future<void> _checkIsFavorite() async {
-    SharedPreferences prefs = await SharedPreferences.getInstance();
-    final favoriteKey = _userStorageKey('webtoon_${widget.webtoon.id}');
+  Future<void> _toggleFavorite() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Silakan login terlebih dahulu untuk menyukai komik ini.')),
+      );
+      return;
+    }
+
     setState(() {
-      _isFavorite = prefs.containsKey(favoriteKey);
+      _isFavorite = !_isFavorite;
     });
+
+    final userRef = FirebaseFirestore.instance.collection('users').doc(user.uid);
+
+    try {
+      if (_isFavorite) {
+        await userRef.set({
+          'favorites': FieldValue.arrayUnion([widget.webtoon.id.toString()])
+        }, SetOptions(merge: true));
+      } else {
+        await userRef.update({
+          'favorites': FieldValue.arrayRemove([widget.webtoon.id.toString()])
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _isFavorite = !_isFavorite;
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Gagal memperbarui favorit: $e')));
+      }
+    }
   }
 
   Widget _buildCoverImage(
@@ -49,11 +93,7 @@ class _DetailScreenState extends State<DetailScreen> {
     }
 
     final lower = image.toLowerCase();
-    final bool isAsset =
-        lower.endsWith('.png') ||
-        lower.endsWith('.jpg') ||
-        lower.endsWith('.jpeg') ||
-        lower.endsWith('.webp');
+    final bool isAsset = lower.endsWith('.png') || lower.endsWith('.jpg') || lower.endsWith('.jpeg') || lower.endsWith('.webp');
 
     if (isAsset) {
       return Image.asset(
@@ -77,35 +117,6 @@ class _DetailScreenState extends State<DetailScreen> {
     }
   }
 
-  // Fungsi menambah/menghapus dari daftar favorit lokal
-  Future<void> _toggleFavorite() async {
-    SharedPreferences prefs = await SharedPreferences.getInstance();
-    final favoriteKey = _userStorageKey('webtoon_${widget.webtoon.id}');
-    final favoriteListKey = _userStorageKey('favoriteWebtoons');
-
-    setState(() {
-      _isFavorite = !_isFavorite;
-    });
-
-    if (_isFavorite) {
-      await prefs.setString(favoriteKey, widget.webtoon.title);
-
-      List<String> favoriteWebtoonIds =
-          prefs.getStringList(favoriteListKey) ?? [];
-      if (!favoriteWebtoonIds.contains(widget.webtoon.id.toString())) {
-        favoriteWebtoonIds.add(widget.webtoon.id.toString());
-      }
-      await prefs.setStringList(favoriteListKey, favoriteWebtoonIds);
-    } else {
-      await prefs.remove(favoriteKey);
-
-      List<String> favoriteWebtoonIds =
-          prefs.getStringList(favoriteListKey) ?? [];
-      favoriteWebtoonIds.remove(widget.webtoon.id.toString());
-      await prefs.setStringList(favoriteListKey, favoriteWebtoonIds);
-    }
-  }
-
   Future<void> _saveHistory(String title, String episode) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -122,15 +133,12 @@ class _DetailScreenState extends State<DetailScreen> {
         try {
           final decoded = jsonDecode(item);
           if (decoded is Map<String, dynamic>) {
-            return decoded['title'] == title &&
-                decoded['episode'] == episode;
+            return decoded['title'] == title && decoded['episode'] == episode;
           }
         } catch (_) {}
 
         final splitData = item.split('|');
-        return splitData.length >= 2 &&
-            splitData[0] == title &&
-            splitData[1] == episode;
+        return splitData.length >= 2 && splitData[0] == title && splitData[1] == episode;
       });
 
       raw.insert(0, entry);
@@ -153,15 +161,45 @@ class _DetailScreenState extends State<DetailScreen> {
         foregroundColor: Colors.black,
         elevation: 0.5,
       ),
+      // --- TOMBOL TAMBAH EPISODE (HANYA MUNCUL UNTUK PEMILIK KOMIK) ---
+      floatingActionButton: FutureBuilder<DocumentSnapshot>(
+        future: FirebaseFirestore.instance.collection('webtoons').doc(widget.webtoon.id.toString()).get(),
+        builder: (context, snapshot) {
+          if (snapshot.hasData && snapshot.data!.exists) {
+            final data = snapshot.data!.data() as Map<String, dynamic>;
+            final webtoonOwnerId = data['userId'];
+            final currentUserId = FirebaseAuth.instance.currentUser?.uid;
+
+            // Jika yang login adalah pembuat komik ini, tampilkan tombolnya
+            if (currentUserId != null && currentUserId == webtoonOwnerId) {
+              return FloatingActionButton.extended(
+                onPressed: () {
+                  // Arahkan ke halaman upload episode
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => UploadEpisodeScreen(webtoonId: widget.webtoon.id.toString()),
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.add),
+                label: const Text('Tambah Episode', style: TextStyle(fontWeight: FontWeight.bold)),
+                backgroundColor: Colors.pink,
+                foregroundColor: Colors.white,
+              );
+            }
+          }
+          return const SizedBox.shrink(); // Sembunyikan jika bukan pemilik komik
+        },
+      ),
+      // ---------------------------------------------------------------
       body: SingleChildScrollView(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 1. Gambar Cover Utama Menggunakan Stack + Tombol Favorit di Sudut
             Stack(
               children: [
                 _buildCoverImage(widget.webtoon.image),
-                // Gradasi gelap di bawah cover agar tombol favorit kontras terlihat
                 Positioned.fill(
                   child: Container(
                     decoration: BoxDecoration(
@@ -192,8 +230,6 @@ class _DetailScreenState extends State<DetailScreen> {
                 ),
               ],
             ),
-
-            // 2. Deskripsi Konten (Sinopsis, Genre, Rating)
             Padding(
               padding: const EdgeInsets.all(16.0),
               child: Column(
@@ -208,7 +244,6 @@ class _DetailScreenState extends State<DetailScreen> {
                   ),
                   const SizedBox(height: 12),
 
-                  // Baris Genre & Rating
                   Row(
                     children: [
                       const Icon(Icons.bookmark, color: kSoftPink, size: 20),
@@ -234,7 +269,6 @@ class _DetailScreenState extends State<DetailScreen> {
                   ),
                   const SizedBox(height: 20),
 
-                  // Detail Sinopsis
                   const Text(
                     'Sinopsis:',
                     style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
@@ -253,7 +287,6 @@ class _DetailScreenState extends State<DetailScreen> {
             ),
             const Divider(thickness: 1),
 
-            // 3. Daftar Episode Komik
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
               child: Text(
@@ -262,100 +295,126 @@ class _DetailScreenState extends State<DetailScreen> {
               ),
             ),
 
-            ListView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: widget.webtoon.episodes.length,
-              itemBuilder: (context, index) {
-                final String episodeName = widget.webtoon.episodes[index];
-                return Container(
-                  margin: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 6,
-                  ),
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.grey.shade200),
-                  ),
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(12),
-                    onTap: () async {
-                      await _saveHistory(
-                        widget.webtoon.title,
-                        episodeName,
-                      );
+            StreamBuilder<QuerySnapshot>(
+              stream: FirebaseFirestore.instance
+                  .collection('webtoons')
+                  .doc(widget.webtoon.id.toString())
+                  .collection('episodes')
+                  .orderBy('episodeNumber')
+                  .snapshots(),
+              builder: (context, snapshot) {
+                List<String> episodesList = List<String>.from(widget.webtoon.episodes);
 
-                      if (!mounted) return;
+                if (snapshot.hasData && snapshot.data!.docs.isNotEmpty) {
+                  episodesList.clear();
+                  for (var doc in snapshot.data!.docs) {
+                    episodesList.add(doc['title'].toString());
+                  }
+                }
 
-                      await Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => ViewerScreen(
-                            title: widget.webtoon.title,
-                            episodeTitle: episodeName,
-                            episodes: widget.webtoon.episodes,
-                            initialEpisodeIndex: index,
-                            coverImage: widget.webtoon.image,
-                          ),
-                        ),
-                      );
-                    },
-                    child: Row(
-                      children: [
-                        Container(
-                          width: 44,
-                          height: 44,
-                          decoration: BoxDecoration(
-                            color: kSoftPink.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: Center(
-                            child: Text(
-                              '${index + 1}',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                color: kSoftPink,
+                if (episodesList.isEmpty) {
+                  return const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 16.0),
+                    child: Text('Belum ada episode yang tersedia.', style: TextStyle(color: Colors.grey)),
+                  );
+                }
+
+                return ListView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: episodesList.length,
+                  itemBuilder: (context, index) {
+                    final String episodeName = episodesList[index];
+                    return Container(
+                      margin: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 6,
+                      ),
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.grey.shade200),
+                      ),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(12),
+                        onTap: () async {
+                          await _saveHistory(
+                            widget.webtoon.title,
+                            episodeName,
+                          );
+
+                          if (!mounted) return;
+
+                          await Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => ViewerScreen(
+                                title: widget.webtoon.title,
+                                episodeTitle: episodeName,
+                                episodes: episodesList,
+                                initialEpisodeIndex: index,
+                                coverImage: widget.webtoon.image,
                               ),
                             ),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                episodeName,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 14,
+                          );
+                        },
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 44,
+                              height: 44,
+                              decoration: BoxDecoration(
+                                color: kSoftPink.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Center(
+                                child: Text(
+                                  '${index + 1}',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: kSoftPink,
+                                  ),
                                 ),
                               ),
-                              const SizedBox(height: 4),
-                              Text(
-                                'Baca sekarang',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.grey.shade600,
-                                ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    episodeName,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'Baca sekarang',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.grey.shade600,
+                                    ),
+                                  ),
+                                ],
                               ),
-                            ],
-                          ),
+                            ),
+                            const Icon(
+                              Icons.arrow_forward_ios,
+                              size: 14,
+                              color: Colors.grey,
+                            ),
+                          ],
                         ),
-                        const Icon(
-                          Icons.arrow_forward_ios,
-                          size: 14,
-                          color: Colors.grey,
-                        ),
-                      ],
-                    ),
-                  ),
+                      ),
+                    );
+                  },
                 );
               },
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 80), // Beri jarak agar list tidak tertutup tombol mengambang
           ],
         ),
       ),

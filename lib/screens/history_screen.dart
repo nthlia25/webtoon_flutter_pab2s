@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -289,14 +290,15 @@ class _HistoryScreenState extends State<HistoryScreen>
                 return Card(
                   margin: const EdgeInsets.symmetric(
                     horizontal: 16,
-                    vertical: 4,
+                    vertical: 6,
                   ),
                   elevation: 0,
                   shape: RoundedRectangleBorder(
-                    side: BorderSide(color: Colors.grey.shade100),
-                    borderRadius: BorderRadius.circular(8),
+                    side: BorderSide(color: Colors.grey.shade200),
+                    borderRadius: BorderRadius.circular(10),
                   ),
-                  child: ListTile(
+                  child: ExpansionTile(
+                    tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                     leading: Container(
                       width: 40,
                       height: 40,
@@ -313,132 +315,113 @@ class _HistoryScreenState extends State<HistoryScreen>
                       item['title'] ?? '',
                       style: const TextStyle(
                         fontWeight: FontWeight.bold,
-                        fontSize: 15,
+                        fontSize: 16,
                       ),
                     ),
-                    subtitle: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const SizedBox(height: 4),
-                        for (final episode in episodes)
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  '${episode['episode']}: ${_formatTimestamp(episode['timestamp'])}',
-                                  style: const TextStyle(
-                                    fontSize: 12,
-                                    color: Colors.black54,
-                                  ),
-                                ),
-                                if ((episode['latitude'] ?? '').isNotEmpty &&
-                                    (episode['longitude'] ?? '').isNotEmpty)
-                                  Row(
-                                    children: [
-                                      const Icon(
-                                        Icons.location_on,
-                                        size: 14,
-                                        color: kSoftPink,
-                                      ),
-                                      const SizedBox(width: 4),
-                                      Expanded(
-                                        child: Text(
-                                          '${episode['latitude']?.substring(0, 8)}, ${episode['longitude']?.substring(0, 8)}',
-                                          style: const TextStyle(
-                                            fontSize: 11,
-                                            color: Colors.black45,
-                                          ),
-                                        ),
-                                      ),
-                                      TextButton(
-                                        onPressed: () async {
-                                          await _openEpisodeLocation(
-                                            episode['latitude'] ?? '',
-                                            episode['longitude'] ?? '',
-                                          );
-                                        },
-                                        style: TextButton.styleFrom(
-                                          padding: EdgeInsets.zero,
-                                          minimumSize: const Size(0, 0),
-                                        ),
-                                        child: const Text(
-                                          'Maps',
-                                          style: TextStyle(
-                                            fontSize: 11,
-                                            color: kSoftPink,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  )
-                                else
-                                  const Text(
-                                    'Belum ada GPS',
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      color: Colors.black45,
-                                    ),
-                                  ),
-                              ],
-                            ),
+                    subtitle: Text(
+                      '${episodes.length} episode dibaca',
+                      style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+                    ),
+                    children: [
+                      const Divider(height: 1, thickness: 1),
+                      for (final episode in episodes)
+                        ListTile(
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
+                          dense: true,
+                          title: Text(
+                            episode['episode'] ?? 'Episode',
+                            style: const TextStyle(fontWeight: FontWeight.w600),
                           ),
-                      ],
-                    ),
-                    trailing: const Icon(
-                      Icons.chevron_right,
-                      color: Colors.grey,
-                    ),
-                    onTap: () async {
-                      // Mencari objek Webtoon asli berdasarkan judul agar bisa diarahkan ke DetailScreen
-                      try {
-                        final prefs = await SharedPreferences.getInstance();
-                        final uid = FirebaseAuth.instance.currentUser?.uid ?? 'guest';
-                        final List<String> uploaded =
-                            prefs.getStringList('${uid}_uploaded_webtoons') ??
-                            prefs.getStringList('uploaded_webtoons') ??
-                            [];
-
-                        final targetWebtoon = uploaded
-                            .map((raw) => jsonDecode(raw))
-                            .whereType<Map<String, dynamic>>()
-                            .map((decoded) => Webtoon.fromJson(decoded))
-                            .firstWhere(
-                              (webtoon) =>
-                                  webtoon.title.toLowerCase() ==
-                                  (item['title'] ?? '').toLowerCase(),
-                              orElse: () => Webtoon(
-                                id: '',
-                                title: '',
-                                genre: '',
-                                rating: '0.0',
-                                image: '',
-                                synopsis: '',
-                                episodes: const [],
+                          subtitle: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Dibaca pada: ${_formatTimestamp(episode['timestamp'])}',
+                                style: const TextStyle(color: Colors.black54),
+                              ),
+                              if ((episode['latitude'] ?? '').isNotEmpty &&
+                                  (episode['longitude'] ?? '').isNotEmpty)
+                                Row(
+                                  children: [
+                                    const Icon(Icons.location_on, size: 12, color: kSoftPink),
+                                    const SizedBox(width: 4),
+                                    Expanded(
+                                      child: Text(
+                                        'Lat: ${episode['latitude']?.substring(0, 8)}, Lng: ${episode['longitude']?.substring(0, 8)}',
+                                        style: const TextStyle(fontSize: 11, color: Colors.black45),
+                                      ),
+                                    ),
+                                    TextButton(
+                                      onPressed: () async {
+                                        await _openEpisodeLocation(
+                                          episode['latitude'] ?? '',
+                                          episode['longitude'] ?? '',
+                                        );
+                                      },
+                                      style: TextButton.styleFrom(
+                                        padding: EdgeInsets.zero,
+                                        minimumSize: const Size(0, 0),
+                                      ),
+                                      child: const Text('Maps', style: TextStyle(fontSize: 11, color: kSoftPink)),
+                                    ),
+                                  ],
+                                ),
+                            ],
+                          ),
+                          trailing: const Icon(Icons.arrow_forward_ios, size: 12, color: Colors.grey),
+                          onTap: () async {
+                            // Menampilkan indikator loading sesaat
+                            showDialog(
+                              context: context,
+                              barrierDismissible: false,
+                              builder: (context) => const Center(
+                                child: CircularProgressIndicator(color: kSoftPink),
                               ),
                             );
 
-                        if (targetWebtoon.id.isEmpty) {
-                          throw Exception('Webtoon not found');
-                        }
+                            try {
+                              // [PERUBAHAN]: Cari webtoon di Firestore, bukan di penyimpanan lokal
+                              final querySnapshot = await FirebaseFirestore.instance
+                                  .collection('webtoons')
+                                  .where('title', isEqualTo: item['title'])
+                                  .limit(1)
+                                  .get();
 
-                        await Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) =>
-                                DetailScreen(webtoon: targetWebtoon),
-                          ),
-                        );
-                        _loadHistory();
-                      } catch (e) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Detail komik tidak ditemukan.'),
-                          ),
-                        );
-                      }
-                    },
+                              // Tutup dialog loading
+                              if (context.mounted) Navigator.pop(context);
+
+                              if (querySnapshot.docs.isEmpty) {
+                                throw Exception('Webtoon tidak ditemukan di Firestore');
+                              }
+
+                              final docData = querySnapshot.docs.first.data();
+                              final targetWebtoon = Webtoon.fromJson(docData);
+
+                              if (context.mounted) {
+                                await Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => DetailScreen(webtoon: targetWebtoon),
+                                  ),
+                                );
+                                _loadHistory(); // Refresh riwayat setelah kembali dari halaman detail
+                              }
+                            } catch (e) {
+                              if (context.mounted) {
+                                // Tutup loading dialog jika masih terbuka saat error
+                                if (Navigator.canPop(context)) Navigator.pop(context);
+                                
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Detail komik tidak ditemukan atau sudah dihapus.'),
+                                  ),
+                                );
+                              }
+                            }
+                          },
+                        ),
+                      const SizedBox(height: 8),
+                    ],
                   ),
                 );
               },

@@ -6,11 +6,12 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:uuid/uuid.dart';
 
-// Mengubah nama variabel global agar tidak bentrok dengan lokal 'uid' Auth
+// PASTIKAN IMPORT FILE INI SESUAI:
+import 'upload_episode_screen.dart'; 
+
 const _uuidGenerator = Uuid();
 
 class UploadScreen extends StatefulWidget {
@@ -162,74 +163,78 @@ class _UploadScreenState extends State<UploadScreen> {
   }
 
   Future<void> _submitForm() async {
-  if (!_formKey.currentState!.validate()) return;
+    if (!_formKey.currentState!.validate()) return;
 
-  if (_imageBytes == null) {
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Pilih gambar webtoon terlebih dahulu')));
-    return;
+    if (_imageBytes == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Pilih gambar webtoon terlebih dahulu')));
+      return;
+    }
+
+    if (_selectedGenre == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Pilih genre terlebih dahulu')));
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+
+      if (user == null) {
+        throw Exception('Silakan login terlebih dahulu');
+      }
+
+      final imageBase64 = await _encodeImageToBase64(_imageBytes!);
+      final webtoonId = _uuidGenerator.v4();
+
+      final data = {
+        'id': webtoonId,
+        'userId': user.uid,
+        'title': _titleController.text.trim(),
+        'genre': _selectedGenre,
+        'rating': _ratingController.text.isEmpty ? 0.0 : double.parse(_ratingController.text.trim()),
+        'image': imageBase64,
+        'imageFileName': _imageFileName,
+        'synopsis': _synopsisController.text.trim(),
+        'episodes': <String>[],
+        'uploadedAt': FieldValue.serverTimestamp(),
+        'uploadLatitude': _uploadLatitude == null ? null : double.parse(_uploadLatitude!),
+        'uploadLongitude': _uploadLongitude == null ? null : double.parse(_uploadLongitude!)
+      };
+
+      await FirebaseFirestore.instance.collection('webtoons').doc(webtoonId).set(data);
+
+      widget.onWebtoonAdded(data);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Data Webtoon tersimpan, silakan unggah Episode 1!'),
+          backgroundColor: Colors.green,
+        ));
+
+        // Pindah ke halaman Upload Episode dengan membawa webtoonId
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (context) => UploadEpisodeScreen(webtoonId: webtoonId),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
   }
-
-  if (_selectedGenre == null) {
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Pilih genre terlebih dahulu')));
-    return;
-  }
-
-  setState(() => _isLoading = true);
-
-  try {
-    final user = FirebaseAuth.instance.currentUser;
-
-    if (user == null) {
-      throw Exception('Silakan login terlebih dahulu');
-    }
-
-    final imageBase64 = await _encodeImageToBase64(_imageBytes!);
-
-    final webtoonId = _uuidGenerator.v4();
-
-    final data = {
-      'id': webtoonId,
-      'userId': user.uid,
-      'title': _titleController.text.trim(),
-      'genre': _selectedGenre,
-      'rating': _ratingController.text.isEmpty ? 0.0 : double.parse(_ratingController.text.trim()),
-      'image': imageBase64,
-      'imageFileName': _imageFileName,
-      'synopsis': _synopsisController.text.trim(),
-      'episodes': <String>[],
-      'uploadedAt': FieldValue.serverTimestamp(),
-      'uploadLatitude': _uploadLatitude == null ? null : double.parse(_uploadLatitude!),
-      'uploadLongitude': _uploadLongitude == null ? null : double.parse(_uploadLongitude!)
-    };
-
-    await FirebaseFirestore.instance.collection('webtoons').doc(webtoonId).set(data);
-
-    widget.onWebtoonAdded(data);
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Webtoon berhasil diupload'),
-        backgroundColor: Colors.green,
-      ));
-
-      Navigator.pop(context);
-    }
-  } catch (e) {
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e')),
-      );
-    }
-  } finally {
-    if (mounted) {
-      setState(() => _isLoading = false);
-    }
-  }
-}
 
   @override
   Widget build(BuildContext context) {
-    // ... [Bagian UI / Widget Build tetap sama seperti kode Anda karena sudah sangat bagus] ...
     return Scaffold(
       appBar: AppBar(
         title: const Text('Upload Webtoon Baru'),
@@ -268,7 +273,7 @@ class _UploadScreenState extends State<UploadScreen> {
                             children: [
                               const Icon(Icons.image_search, size: 48, color: Colors.pink),
                               const SizedBox(height: 12),
-                              Text('Tap untuk memilih gambar', style: TextStyle(color: Colors.grey[700], fontSize: 16)),
+                              Text('Tap untuk memilih gambar sampul', style: TextStyle(color: Colors.grey[700], fontSize: 16)),
                             ],
                           ),
                   ),
@@ -402,6 +407,8 @@ class _UploadScreenState extends State<UploadScreen> {
                   ),
                 ),
                 const SizedBox(height: 16),
+                
+                // --- PERUBAHAN TEKS TOMBOL AGAR LEBIH JELAS ---
                 SizedBox(
                   width: double.infinity,
                   height: 50,
@@ -418,9 +425,10 @@ class _UploadScreenState extends State<UploadScreen> {
                             width: 20,
                             child: CircularProgressIndicator(strokeWidth: 2, valueColor: AlwaysStoppedAnimation<Color>(Colors.white)),
                           )
-                        : const Text('Upload Webtoon', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                        : const Text('Simpan & Lanjut Isi Episode 1', style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)),
                   ),
                 ),
+                // ----------------------------------------------
               ],
             ),
           ),
