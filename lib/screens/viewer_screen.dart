@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 List<String> buildViewerPanelSources({
   required String? coverImage,
@@ -65,7 +66,8 @@ class ViewerScreen extends StatefulWidget {
 }
 
 class _ViewerScreenState extends State<ViewerScreen> {
-  late final List<String> _comicPanels;
+  List<String> _comicPanels = [];
+  bool _isLoadingPanels = true;
   late final ScrollController _scrollController;
   int _currentPanel = 1;
   bool _isSavingLocation = false;
@@ -77,9 +79,9 @@ class _ViewerScreenState extends State<ViewerScreen> {
     super.initState();
     _scrollController = ScrollController();
     _scrollController.addListener(_updateCurrentPanel);
-    _comicPanels = _buildComicPanels();
     _saveHistory();
     _loadSavedLocation();
+    _loadEpisodePanels();
   }
 
   @override
@@ -90,7 +92,7 @@ class _ViewerScreenState extends State<ViewerScreen> {
   }
 
   void _updateCurrentPanel() {
-    final estimatedIndex = (_scrollController.offset / 420).round();
+    final estimatedIndex = (_scrollController.offset / 700).floor();
     final nextPanel = (estimatedIndex + 1).clamp(1, _comicPanels.length);
     if (nextPanel != _currentPanel) {
       setState(() => _currentPanel = nextPanel);
@@ -199,7 +201,9 @@ class _ViewerScreenState extends State<ViewerScreen> {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Izin lokasi ditolak, tidak bisa mengambil posisi.'),
+              content: Text(
+                'Izin lokasi ditolak, tidak bisa mengambil posisi.',
+              ),
             ),
           );
         }
@@ -219,23 +223,74 @@ class _ViewerScreenState extends State<ViewerScreen> {
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Lokasi bacaan berhasil diperbarui.'),
-          ),
+          const SnackBar(content: Text('Lokasi bacaan berhasil diperbarui.')),
         );
       }
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Gagal mengambil lokasi saat ini.'),
-          ),
+          const SnackBar(content: Text('Gagal mengambil lokasi saat ini.')),
         );
       }
     } finally {
       if (mounted) {
         setState(() => _isSavingLocation = false);
       }
+    }
+  }
+
+  Future<void> _loadEpisodePanels() async {
+    try {
+      final webtoonQuery = await FirebaseFirestore.instance
+          .collection('webtoons')
+          .where('title', isEqualTo: widget.title)
+          .limit(1)
+          .get();
+
+      if (webtoonQuery.docs.isEmpty) {
+        setState(() {
+          _comicPanels = _buildComicPanels();
+          _isLoadingPanels = false;
+        });
+        return;
+      }
+
+      final webtoonId = webtoonQuery.docs.first.id;
+
+      final episodeQuery = await FirebaseFirestore.instance
+          .collection('webtoons')
+          .doc(webtoonId)
+          .collection('episodes')
+          .where('title', isEqualTo: widget.episodeTitle)
+          .limit(1)
+          .get();
+
+      if (episodeQuery.docs.isNotEmpty) {
+        final data = episodeQuery.docs.first.data();
+
+        final images = List<String>.from(data['images'] ?? []);
+
+        if (mounted) {
+          setState(() {
+            _comicPanels = images;
+            _isLoadingPanels = false;
+          });
+        }
+
+        return;
+      }
+
+      setState(() {
+        _comicPanels = _buildComicPanels();
+        _isLoadingPanels = false;
+      });
+    } catch (e) {
+      debugPrint('Load episode error: $e');
+
+      setState(() {
+        _comicPanels = _buildComicPanels();
+        _isLoadingPanels = false;
+      });
     }
   }
 
@@ -269,67 +324,43 @@ class _ViewerScreenState extends State<ViewerScreen> {
   }
 
   Widget _buildPanelImage(String source) {
-    final lower = source.toLowerCase();
-    final isAsset =
-        lower.endsWith('.png') ||
-        lower.endsWith('.jpg') ||
-        lower.endsWith('.jpeg') ||
-        lower.endsWith('.webp');
-
-    if (isAsset) {
-      return Image.asset(
-        'assets/images/$source',
-        fit: BoxFit.fitWidth,
-        width: double.infinity,
-      );
-    }
-
     try {
       final bytes = base64Decode(source);
+
       return Image.memory(
         bytes,
-        fit: BoxFit.fitWidth,
         width: double.infinity,
+        fit: BoxFit.contain,
+        gaplessPlayback: true,
+        filterQuality: FilterQuality.medium,
+        errorBuilder: (context, error, stackTrace) {
+          return Container(
+            height: 250,
+            color: Colors.grey[200],
+            child: const Center(child: Text('Gambar gagal dimuat')),
+          );
+        },
       );
     } catch (_) {
-      if (source.startsWith('http://') || source.startsWith('https://')) {
+      if (source.startsWith('http')) {
         return Image.network(
           source,
-          fit: BoxFit.fitWidth,
           width: double.infinity,
-          loadingBuilder: (context, child, loadingProgress) {
-            if (loadingProgress == null) return child;
-            return SizedBox(
-              height: 300,
-              child: Center(
-                child: CircularProgressIndicator(
-                  value: loadingProgress.expectedTotalBytes != null
-                      ? loadingProgress.cumulativeBytesLoaded /
-                          loadingProgress.expectedTotalBytes!
-                      : null,
-                  color: const Color(0xFFEC4899),
-                ),
-              ),
-            );
-          },
-          errorBuilder: (context, error, stackTrace) {
-            return Container(
-              height: 280,
-              color: Colors.grey[200],
-              child: const Center(
-                child: Text('Gambar tidak tersedia'),
-              ),
-            );
-          },
+          fit: BoxFit.contain,
         );
       }
 
-      return Container(
-        height: 280,
-        color: Colors.grey[200],
-        child: const Center(
-          child: Text('Gambar tidak tersedia'),
-        ),
+      return Image.asset(
+        'assets/images/$source',
+        width: double.infinity,
+        fit: BoxFit.contain,
+        errorBuilder: (context, error, stackTrace) {
+          return Container(
+            height: 250,
+            color: Colors.grey[200],
+            child: const Center(child: Text('Gambar tidak ditemukan')),
+          );
+        },
       );
     }
   }
@@ -458,50 +489,54 @@ class _ViewerScreenState extends State<ViewerScreen> {
               ),
             ),
           Expanded(
-            child: ListView.builder(
-              controller: _scrollController,
-              padding: const EdgeInsets.fromLTRB(12, 12, 12, 32),
-              itemCount: _comicPanels.length,
-              itemBuilder: (context, index) {
-                final panelNumber = index + 1;
-                return Container(
-                  margin: const EdgeInsets.only(bottom: 12),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(18),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.06),
-                        blurRadius: 10,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
-                        child: Text(
-                          'Panel $panelNumber',
-                          style: const TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.black54,
-                          ),
+            child: _isLoadingPanels
+                ? const Center(child: CircularProgressIndicator())
+                : ListView.builder(
+                    controller: _scrollController,
+                    cacheExtent: 5000,
+                    physics: const BouncingScrollPhysics(),
+                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 32),
+                    itemCount: _comicPanels.length,
+                    itemBuilder: (context, index) {
+                      final panelNumber = index + 1;
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(18),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.06),
+                              blurRadius: 10,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
                         ),
-                      ),
-                      ClipRRect(
-                        borderRadius: const BorderRadius.vertical(
-                          bottom: Radius.circular(18),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
+                              child: Text(
+                                'Panel $panelNumber',
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.black54,
+                                ),
+                              ),
+                            ),
+                            ClipRRect(
+                              borderRadius: const BorderRadius.vertical(
+                                bottom: Radius.circular(18),
+                              ),
+                              child: _buildPanelImage(_comicPanels[index]),
+                            ),
+                          ],
                         ),
-                        child: _buildPanelImage(_comicPanels[index]),
-                      ),
-                    ],
+                      );
+                    },
                   ),
-                );
-              },
-            ),
           ),
           SafeArea(
             top: false,
@@ -512,7 +547,9 @@ class _ViewerScreenState extends State<ViewerScreen> {
                 children: [
                   Expanded(
                     child: ElevatedButton.icon(
-                      onPressed: canGoPrev ? () => _navigateToEpisode(-1) : null,
+                      onPressed: canGoPrev
+                          ? () => _navigateToEpisode(-1)
+                          : null,
                       icon: const Icon(Icons.skip_previous_rounded),
                       label: const Text('Sebelumnya'),
                       style: ElevatedButton.styleFrom(
